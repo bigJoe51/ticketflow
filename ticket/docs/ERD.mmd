@@ -1,0 +1,170 @@
+erDiagram
+    ROLE {
+        BIGINT id
+        VARCHAR name
+        VARCHAR description
+    }
+
+    DEPARTMENT {
+        BIGINT id
+        VARCHAR name
+        VARCHAR description
+    }
+
+    USER {
+        BIGINT id
+        VARCHAR username
+        VARCHAR first_name
+        VARCHAR last_name
+        VARCHAR email
+        VARCHAR password
+        VARCHAR phone_number
+        VARCHAR profile_image_url
+        VARCHAR status
+        BIGINT role_id
+        BIGINT department_id
+    }
+
+    TICKET_CATEGORY {
+        BIGINT id
+        VARCHAR name
+        VARCHAR description
+    }
+
+    ESCALATION_RULE {
+        BIGINT id
+        VARCHAR priority
+        INT threshold_minutes
+        INT escalation_level
+        BIGINT assigned_to
+        VARCHAR notification_template
+        BOOLEAN active
+    }
+
+    SLA {
+        BIGINT id
+        BIGINT category_id
+        BIGINT escalation_rule_id
+        INT response_time_minutes
+        INT resolution_time_minutes
+        VARCHAR priority_level
+    }
+
+    ASSET {
+        BIGINT id
+        VARCHAR name
+        VARCHAR description
+        VARCHAR serial_number
+        VARCHAR status
+        DATE procurement_date
+        DATE warranty_expiry_date
+        VARCHAR location
+        BIGINT assigned_to
+        BIGINT department_id
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    TICKET {
+        BIGINT id
+        VARCHAR title
+        TEXT description
+        VARCHAR ticket_type
+        VARCHAR priority
+        VARCHAR status
+        BOOLEAN sla_breached
+        BIGINT category_id
+        BIGINT department_id
+        BIGINT created_by
+        BIGINT assigned_to
+        BIGINT sla_id
+        BIGINT asset_id
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+        TIMESTAMP resolved_at
+    }
+
+    TICKET_COMMENT {
+        BIGINT id
+        BIGINT ticket_id
+        BIGINT user_id
+        TEXT comment
+        TIMESTAMP created_at
+    }
+
+    ATTACHMENT {
+        BIGINT id
+        BIGINT ticket_id
+        BIGINT uploaded_by
+        VARCHAR file_name
+        VARCHAR file_url
+        VARCHAR file_type
+        BIGINT file_size
+        TIMESTAMP uploaded_at
+    }
+
+    TICKET_RATING {
+        BIGINT id
+        BIGINT ticket_id
+        BIGINT staff_id
+        INT rating
+        TEXT feedback_comment
+    }
+
+    KNOWLEDGE_ARTICLE {
+        BIGINT id
+        BIGINT author_id
+        BIGINT approved_by
+        VARCHAR title
+        TEXT content
+        VARCHAR status
+        TIMESTAMP created_at
+    }
+
+    NOTIFICATION {
+        BIGINT id
+        BIGINT user_id
+        TEXT message
+        BOOLEAN is_read
+        TIMESTAMP created_at
+    }
+
+    AUDIT_LOG {
+        BIGINT id
+        BIGINT performed_by
+        VARCHAR action
+        VARCHAR entity_type
+        BIGINT entity_id
+        TEXT old_value
+        TEXT new_value
+        TIMESTAMP timestamp
+        VARCHAR ip_address
+    }
+
+    ROLE ||--o{ USER : has
+    DEPARTMENT ||--o{ USER : groups
+    DEPARTMENT ||--o{ TICKET : routes
+    DEPARTMENT ||--o{ ASSET : owns
+
+    USER ||--o{ TICKET : creates
+    USER ||--o{ TICKET : assigned_to
+    USER ||--o{ TICKET_COMMENT : writes
+    USER ||--o{ ATTACHMENT : uploads
+    USER ||--o{ TICKET_RATING : receives_rating
+    USER ||--o{ KNOWLEDGE_ARTICLE : authors
+    USER ||--o{ KNOWLEDGE_ARTICLE : approves
+    USER ||--o{ NOTIFICATION : receives
+    USER ||--o{ AUDIT_LOG : performs
+    USER ||--o{ ESCALATION_RULE : escalation_owner
+    USER ||--o{ ASSET : assigned_asset
+
+    TICKET_CATEGORY ||--o{ TICKET : categorizes
+    TICKET_CATEGORY ||--o{ SLA : defines
+
+    ESCALATION_RULE ||--o{ SLA : used_by
+    SLA ||--o{ TICKET : applies_to
+    ASSET ||--o{ TICKET : linked_to
+
+    TICKET ||--o{ TICKET_COMMENT : has
+    TICKET ||--o{ ATTACHMENT : has
+    TICKET ||--|| TICKET_RATING : receives

@@ -1,0 +1,178 @@
+// TicketFlow Ticket Management System ERD (from JPA entities)
+// Source: src/main/java/com/kilimo/ticket/model
+
+Table role {
+  id bigint [pk, increment]
+  name varchar
+  description varchar
+}
+
+Table department {
+  id bigint [pk, increment]
+  name varchar
+  description varchar
+}
+
+Table "user" {
+  id bigint [pk, increment]
+  username varchar
+  first_name varchar
+  last_name varchar
+  email varchar [unique]
+  password varchar
+  phone_number varchar
+  profile_image_url varchar
+  status varchar
+  role_id bigint [null]
+  department_id bigint [null]
+}
+
+Table ticket_category {
+  id bigint [pk, increment]
+  name varchar
+  description varchar
+}
+
+Table escalation_rule {
+  id bigint [pk, increment]
+  priority varchar
+  threshold_minutes int
+  escalation_level int
+  assigned_to bigint
+  notification_template varchar
+  active boolean
+}
+
+Table sla {
+  id bigint [pk, increment]
+  category_id bigint
+  escalation_rule_id bigint
+  response_time_minutes int
+  resolution_time_minutes int
+  priority_level varchar
+}
+
+Table asset {
+  id bigint [pk, increment]
+  name varchar
+  description varchar
+  serial_number varchar
+  status varchar
+  procurement_date date
+  warranty_expiry_date date
+  location varchar
+  assigned_to bigint
+  department_id bigint
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table ticket {
+  id bigint [pk, increment]
+  title varchar
+  description text
+  ticket_type varchar
+  priority varchar
+  status varchar
+  sla_breached boolean
+  category_id bigint
+  department_id bigint
+  created_by bigint
+  assigned_to bigint
+  sla_id bigint
+  asset_id bigint
+  created_at timestamp
+  updated_at timestamp
+  resolved_at timestamp
+}
+
+Table ticket_comment {
+  id bigint [pk, increment]
+  ticket_id bigint
+  user_id bigint
+  comment text
+  created_at timestamp
+}
+
+Table attachment {
+  id bigint [pk, increment]
+  ticket_id bigint
+  uploaded_by bigint
+  file_name varchar
+  file_url varchar
+  file_type varchar
+  file_size bigint
+  uploaded_at timestamp
+}
+
+Table ticket_rating {
+  id bigint [pk, increment]
+  ticket_id bigint [unique]
+  staff_id bigint
+  rating int
+  feedback_comment text
+}
+
+Table knowledge_article {
+  id bigint [pk, increment]
+  author_id bigint
+  approved_by bigint [null]
+  title varchar
+  content text
+  status varchar
+  created_at timestamp
+}
+
+Table notification {
+  id bigint [pk, increment]
+  user_id bigint
+  message text
+  is_read boolean
+  created_at timestamp
+}
+
+Table audit_log {
+  id bigint [pk, increment]
+  performed_by bigint
+  action varchar
+  entity_type varchar
+  entity_id bigint
+  old_value text
+  new_value text
+  timestamp timestamp
+  ip_address varchar
+}
+
+Ref: "user".role_id > role.id
+Ref: "user".department_id > department.id
+
+Ref: escalation_rule.assigned_to > "user".id
+
+Ref: sla.category_id > ticket_category.id
+Ref: sla.escalation_rule_id > escalation_rule.id
+
+Ref: asset.assigned_to > "user".id
+Ref: asset.department_id > department.id
+
+Ref: ticket.category_id > ticket_category.id
+Ref: ticket.department_id > department.id
+Ref: ticket.created_by > "user".id
+Ref: ticket.assigned_to > "user".id
+Ref: ticket.sla_id > sla.id
+Ref: ticket.asset_id > asset.id
+
+Ref: ticket_comment.ticket_id > ticket.id
+Ref: ticket_comment.user_id > "user".id
+
+Ref: attachment.ticket_id > ticket.id
+Ref: attachment.uploaded_by > "user".id
+
+Ref: ticket_rating.ticket_id > ticket.id
+Ref: ticket_rating.staff_id > "user".id
+
+Ref: knowledge_article.author_id > "user".id
+Ref: knowledge_article.approved_by > "user".id
+
+Ref: notification.user_id > "user".id
+
+Ref: audit_log.performed_by > "user".id
