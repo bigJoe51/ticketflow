@@ -49,6 +49,12 @@ public class TicketService {
         if (ticket.getPriority() == null || ticket.getPriority().isBlank()) {
             ticket.setPriority("MEDIUM");
         }
+        if (ticket.getAssignedTo() != null && !isStaffUser(ticket.getAssignedTo())) {
+            throw new IllegalArgumentException("Tickets can only be assigned to staff users");
+        }
+        if (ticket.getAssignedTo() == null && "IN_PROGRESS".equalsIgnoreCase(ticket.getStatus())) {
+            throw new IllegalArgumentException("Assign a staff member before a ticket can be in progress");
+        }
         if (ticket.getAssignedTo() != null && "OPEN".equalsIgnoreCase(ticket.getStatus())) {
             ticket.setStatus("IN_PROGRESS");
         }
@@ -176,9 +182,6 @@ public class TicketService {
         boolean assignmentChanged = false;
         boolean priorityChanged = false;
 
-        if (status != null && !status.isBlank()) {
-            ticket.setStatus(status.toUpperCase());
-        }
         if (priority != null && !priority.isBlank()) {
             String normalizedPriority = priority.toUpperCase(Locale.ROOT);
             priorityChanged = previousPriority == null || !previousPriority.equalsIgnoreCase(normalizedPriority);
@@ -187,11 +190,27 @@ public class TicketService {
         if (assignedToId != null) {
             User assignedUser = userRepository.findById(assignedToId)
                 .orElseThrow(() -> new IllegalArgumentException("Assigned staff not found"));
+            if (!isStaffUser(assignedUser)) {
+                throw new IllegalArgumentException("Tickets can only be assigned to staff users");
+            }
             assignmentChanged = previousAssignee == null || !assignedUser.getId().equals(previousAssignee.getId());
             ticket.setAssignedTo(assignedUser);
         } else if (Boolean.TRUE.equals(clearAssignment)) {
             assignmentChanged = previousAssignee != null;
             ticket.setAssignedTo(null);
+        }
+        if (status != null && !status.isBlank()) {
+            String normalizedStatus = normalizeRequestedStatus(status);
+            if ("IN_PROGRESS".equals(normalizedStatus) && ticket.getAssignedTo() == null) {
+                throw new IllegalArgumentException("Assign a staff member before a ticket can be in progress");
+            }
+            if ("IN_PROGRESS".equals(normalizedStatus) && !assignmentChanged && !"IN_PROGRESS".equalsIgnoreCase(previousStatus)) {
+                throw new IllegalArgumentException("In progress is set automatically when a ticket is assigned");
+            }
+            if ("RESOLVED".equals(normalizedStatus) && ticket.getAssignedTo() == null) {
+                throw new IllegalArgumentException("Assign a staff member before resolving a ticket");
+            }
+            ticket.setStatus(normalizedStatus);
         }
         if (assignmentChanged) {
             resetEscalationTimer(ticket);
@@ -369,6 +388,24 @@ public class TicketService {
             return "MEDIUM";
         }
         return priority.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeRequestedStatus(String status) {
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if ("ESCALATED".equals(normalized)) {
+            throw new IllegalArgumentException("Escalation is managed by escalation rules");
+        }
+        if ("CLOSED".equals(normalized) || "CANCELLED".equals(normalized)) {
+            throw new IllegalArgumentException("Only open and resolved ticket state changes are supported from this action");
+        }
+        if (!Set.of("OPEN", "IN_PROGRESS", "RESOLVED").contains(normalized)) {
+            throw new IllegalArgumentException("Unsupported ticket status: " + status);
+        }
+        return normalized;
+    }
+
+    private boolean isStaffUser(User user) {
+        return user.getRole() != null && "STAFF".equalsIgnoreCase(user.getRole().getName());
     }
 
     private void notifyTicketStakeholders(Ticket ticket, String message) {

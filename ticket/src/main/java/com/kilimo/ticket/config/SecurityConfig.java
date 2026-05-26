@@ -20,6 +20,9 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 @Configuration
@@ -128,25 +131,24 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        
-        // Read allowed origins from environment, fallback to defaults
+
+        // Keep configured VPS/public origins and always include local frontend origins for dev testing.
         String allowedOriginsEnv = environment.getProperty("CORS_ALLOWED_ORIGINS", "");
-        List<String> allowedOrigins;
-        
+        LinkedHashSet<String> allowedOrigins = new LinkedHashSet<>(List.of(
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
+        ));
+
         if (allowedOriginsEnv != null && !allowedOriginsEnv.isBlank()) {
-            // Split comma-separated origins from env variable
-            allowedOrigins = List.of(allowedOriginsEnv.split(","));
-        } else {
-            // Fallback to defaults for local development
-            allowedOrigins = List.of(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:3000",
-                "http://127.0.0.1:3000"
-            );
+            Arrays.stream(allowedOriginsEnv.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isBlank())
+                .forEach(allowedOrigins::add);
         }
         
-        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowedOrigins(new ArrayList<>(allowedOrigins));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         configuration.setExposedHeaders(List.of("Authorization"));

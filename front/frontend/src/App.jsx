@@ -457,6 +457,7 @@ function DashboardPage() {
             {section === 'sla' && <SlaSection showToast={showToast} />}
             {section === 'reports' && <ReportsSection data={data} />}
             {section === 'escalations' && <EscalationWatch tickets={data.tickets} setSection={setSection} />}
+            {section === 'audit' && <AuditLogSection audit={data.audit} />}
             {section === 'feedback' && <FeedbackSection user={user} tickets={data.tickets} ratings={data.ratings} showToast={showToast} />}
             {section === 'profile' && <ProfileSection user={user} showToast={showToast} />}
           </>
@@ -529,21 +530,25 @@ function Overview({ role, data, tickets, setSection }) {
 }
 
 function TicketsSection({ role, data, tickets, filters, setFilters, refresh, showToast }) {
-  const updateTicket = async (ticket, status) => {
+  const [activeTicket, setActiveTicket] = useState(null)
+  const [deletingTicket, setDeletingTicket] = useState(null)
+
+  const updateTicket = async (ticket, values) => {
     try {
-      await API.put(`/tickets/${ticket.id}`, { status, priority: ticket.priority })
+      await API.put(`/tickets/${ticket.id}`, values)
       showToast('Ticket updated')
-      refresh()
+      setActiveTicket(null)
+      await refresh()
     } catch (err) {
       showToast(getErrorMessage(err, 'Could not update ticket.'), 'error')
     }
   }
   const deleteTicket = async (id) => {
-    if (!confirm('Delete this ticket?')) return
     try {
       await API.delete(`/tickets/${id}`)
       showToast('Ticket deleted')
-      refresh()
+      setDeletingTicket(null)
+      await refresh()
     } catch (err) {
       showToast(getErrorMessage(err, 'Could not delete ticket.'), 'error')
     }
@@ -567,8 +572,8 @@ function TicketsSection({ role, data, tickets, filters, setFilters, refresh, sho
               <tr key={ticket.id}>
                 <td>#{ticket.id}</td><td>{ticket.title || '-'}</td><td><Badge value={ticket.status} /></td><td><span className={priorityClass(ticket.priority)}>{ticket.priority || '-'}</span></td><td>{ticket.assignedStaffName || ticket.assignedStaff || 'Unassigned'}</td><td>{formatDateTime(ticket.createdAt)}</td>
                 <td className="inline-actions">
-                  {role !== 'client' && <select className="form-input table-action-select" value={ticket.status || 'OPEN'} onChange={(event) => updateTicket(ticket, event.target.value)}><option>OPEN</option><option>IN_PROGRESS</option><option>ESCALATED</option><option>RESOLVED</option></select>}
-                  {role === 'client' && <button className="btn btn-sm btn-danger" type="button" onClick={() => deleteTicket(ticket.id)}>Delete</button>}
+                  {role !== 'client' && <button className="btn btn-sm btn-outline" type="button" onClick={() => setActiveTicket(ticket)}><i className="fas fa-sliders" /> Manage</button>}
+                  {role === 'client' && <button className="btn btn-sm btn-danger" type="button" onClick={() => setDeletingTicket(ticket)}>Delete</button>}
                 </td>
               </tr>
             ))}
@@ -578,7 +583,117 @@ function TicketsSection({ role, data, tickets, filters, setFilters, refresh, sho
       <div className="kanban-board">
         {['OPEN', 'IN_PROGRESS', 'ESCALATED', 'RESOLVED'].map((status) => <div className="kanban-column" key={status}><h4>{status.replaceAll('_', ' ')}</h4>{tickets.filter((ticket) => String(ticket.status).toUpperCase() === status).map((ticket) => <div className="kanban-card" key={ticket.id}><strong>#{ticket.id} {ticket.title}</strong><span>{ticket.priority}</span></div>)}</div>)}
       </div>
+      <TicketOperationsModal
+        ticket={activeTicket}
+        role={role}
+        staff={getRegisteredStaff(data.users)}
+        onClose={() => setActiveTicket(null)}
+        onSave={(values) => updateTicket(activeTicket, values)}
+      />
+      <ConfirmModal
+        open={Boolean(deletingTicket)}
+        title="Delete Ticket"
+        message={deletingTicket ? `Delete ticket #${deletingTicket.id} ${deletingTicket.title || ''}? This cannot be undone.` : ''}
+        tone="danger"
+        confirmLabel="Delete Ticket"
+        onCancel={() => setDeletingTicket(null)}
+        onConfirm={() => deleteTicket(deletingTicket.id)}
+      />
     </section>
+  )
+}
+
+function TicketOperationsModal({ ticket, role, staff, onClose, onSave }) {
+  const [form, setForm] = useState({ status: '', priority: 'MEDIUM', assignedToId: '', clearAssignment: false })
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!ticket) return
+    setForm({
+      status: '',
+      priority: String(ticket.priority || 'MEDIUM').toUpperCase(),
+      assignedToId: ticket.assignedStaffId ? String(ticket.assignedStaffId) : '',
+      clearAssignment: false,
+    })
+    setError('')
+  }, [ticket])
+
+  if (!ticket) return null
+
+  const submit = (event) => {
+    event.preventDefault()
+    const payload = {
+      priority: form.priority,
+    }
+    if (form.status) payload.status = form.status
+    if (role === 'admin') {
+      payload.assignedToId = form.clearAssignment || !form.assignedToId ? null : Number(form.assignedToId)
+      payload.clearAssignment = Boolean(form.clearAssignment || !form.assignedToId)
+    }
+    if (form.status === 'RESOLVED' && role === 'admin' && !payload.assignedToId && !ticket.assignedStaffId) {
+      setError('Assign a staff member before resolving this ticket.')
+      return
+    }
+    onSave(payload)
+  }
+
+  return (
+    <div className="app-modal active" role="dialog" aria-modal="true" aria-labelledby="ticket-operations-title">
+      <div className="app-modal-backdrop" onClick={onClose} />
+      <div className="app-modal-dialog ticket-operations-modal">
+        <button className="app-modal-close" type="button" aria-label="Close ticket operations" onClick={onClose}><i className="fas fa-times" /></button>
+        <div className="modal-kicker">Ticket Operations</div>
+        <h3 id="ticket-operations-title">#{ticket.id} {ticket.title || 'Ticket'}</h3>
+        <div className="ticket-detail-grid">
+          <div className="ticket-detail-chip"><strong>Status</strong><span>{ticket.status || '-'}</span></div>
+          <div className="ticket-detail-chip"><strong>Priority</strong><span>{ticket.priority || '-'}</span></div>
+          <div className="ticket-detail-chip"><strong>Assigned</strong><span>{ticket.assignedStaffName || ticket.assignedStaff || 'Unassigned'}</span></div>
+        </div>
+        <form onSubmit={submit}>
+          <SelectBare label="Status Action" value={form.status} onChange={(value) => { setError(''); setForm({ ...form, status: value }) }} options={[{ value: '', label: 'No manual change' }, { value: 'OPEN', label: 'Reopen' }, { value: 'RESOLVED', label: 'Resolve' }]} />
+          <SelectBare label="Change Priority" value={form.priority} onChange={(value) => setForm({ ...form, priority: value })} options={['LOW', 'MEDIUM', 'HIGH'].map((value) => ({ value, label: value }))} />
+          {role === 'admin' && (
+            <>
+              <div className="form-group ticket-filter-group">
+                <label>Assign To Staff</label>
+                <select className="form-input" value={form.assignedToId} disabled={form.clearAssignment} onChange={(event) => setForm({ ...form, assignedToId: event.target.value, clearAssignment: false })}>
+                  <option value="">Unassigned</option>
+                  {staff.map((member) => <option key={member.id} value={member.id}>{fullName(member)} ({member.email})</option>)}
+                </select>
+              </div>
+              <label className="remember-me modal-check">
+                <input type="checkbox" checked={form.clearAssignment} onChange={(event) => setForm({ ...form, clearAssignment: event.target.checked, assignedToId: event.target.checked ? '' : form.assignedToId })} />
+                <span>Clear current assignment</span>
+              </label>
+            </>
+          )}
+          {error && <p className="modal-error">{error}</p>}
+          <div className="modal-actions">
+            <button className="btn btn-outline" type="button" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" type="submit"><i className="fas fa-save" /> Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function ConfirmModal({ open, title, message, tone = 'primary', confirmLabel = 'Confirm', onCancel, onConfirm }) {
+  if (!open) return null
+  return (
+    <div className="app-modal active" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+      <div className="app-modal-backdrop" onClick={onCancel} />
+      <div className="app-modal-dialog confirm-modal">
+        <button className="app-modal-close" type="button" aria-label="Close confirmation" onClick={onCancel}><i className="fas fa-times" /></button>
+        <div className={`confirm-modal-icon confirm-modal-icon-${tone}`}><i className="fas fa-triangle-exclamation" /></div>
+        <h3 id="confirm-modal-title">{title}</h3>
+        <p>{message}</p>
+        <div className="modal-actions">
+          <button className="btn btn-outline" type="button" onClick={onCancel}>Cancel</button>
+          <button className={`btn ${tone === 'danger' ? 'btn-danger' : 'btn-primary'}`} type="button" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -680,7 +795,7 @@ function UsersSection({ users, departments, refresh, showToast }) {
     showToast('User updated')
     refresh()
   }
-  return <section className="dashboard-section active"><div className="dashboard-grid"><div className="table-container"><h3>Users</h3><table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>{users.map((u) => <tr key={u.id}><td>{u.id}</td><td>{fullName(u)}</td><td>{u.email}</td><td>{displayRole(u.role)}</td><td><Badge value={u.status || 'ACTIVE'} /></td><td><button className="btn btn-sm btn-outline" onClick={() => updateUser(u.id, 'status', 'ACTIVE')}>Activate</button><button className="btn btn-sm btn-outline" onClick={() => updateUser(u.id, 'status', 'INACTIVE')}>Deactivate</button></td></tr>)}</tbody></table></div><div className="table-container"><h3>Create User</h3><form onSubmit={submit}>{['firstName', 'lastName', 'username', 'email', 'password'].map((key) => <Field key={key} label={key} type={key === 'password' ? 'password' : 'text'} value={form[key]} onChange={(value) => setForm({ ...form, [key]: value })} />)}<SelectBare label="Role" value={form.roleId} onChange={(value) => setForm({ ...form, roleId: value })} options={[{ value: 2, label: 'STAFF' }, { value: 3, label: 'CLIENT' }]} /><SelectBare label="Department" value={form.departmentId} onChange={(value) => setForm({ ...form, departmentId: value })} options={departments.map((d) => ({ value: d.id, label: d.name }))} /><button className="btn btn-primary btn-block">Create User</button></form></div></div></section>
+  return <section className="dashboard-section active"><div className="dashboard-grid"><div className="table-container"><h3>Users</h3><table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>{users.map((u) => <tr key={u.id}><td>{u.id}</td><td>{fullName(u)}</td><td>{u.email}</td><td><select className="form-input table-action-select" value={displayRole(u.role)} onChange={(event) => updateUser(u.id, 'role', event.target.value)}><option>ADMIN</option><option>STAFF</option><option>CLIENT</option></select></td><td><Badge value={u.status || 'ACTIVE'} /></td><td><button className="btn btn-sm btn-outline" onClick={() => updateUser(u.id, 'status', 'ACTIVE')}>Activate</button><button className="btn btn-sm btn-outline" onClick={() => updateUser(u.id, 'status', 'INACTIVE')}>Deactivate</button></td></tr>)}</tbody></table></div><div className="table-container"><h3>Create User</h3><form onSubmit={submit}>{['firstName', 'lastName', 'username', 'email', 'password'].map((key) => <Field key={key} label={key} type={key === 'password' ? 'password' : 'text'} value={form[key]} onChange={(value) => setForm({ ...form, [key]: value })} />)}<SelectBare label="Role" value={form.roleId} onChange={(value) => setForm({ ...form, roleId: value })} options={[{ value: 2, label: 'STAFF' }, { value: 3, label: 'CLIENT' }]} /><SelectBare label="Department" value={form.departmentId} onChange={(value) => setForm({ ...form, departmentId: value })} options={departments.map((d) => ({ value: d.id, label: d.name }))} /><button className="btn btn-primary btn-block">Create User</button></form></div></div></section>
 }
 
 function DepartmentsSection({ departments, refresh, showToast }) {
@@ -693,14 +808,25 @@ function DepartmentsSection({ departments, refresh, showToast }) {
   return <section className="dashboard-section active"><div className="table-container"><h3>Department Management</h3><form className="inline-form" onSubmit={submit}><input className="form-input" placeholder="Department name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><input className="form-input" placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /><button className="btn btn-primary btn-sm">Add Department</button></form><table><thead><tr><th>ID</th><th>Name</th><th>Description</th></tr></thead><tbody>{departments.map((d) => <tr key={d.id}><td>{d.id}</td><td>{d.name}</td><td>{d.description || '-'}</td></tr>)}</tbody></table></div></section>
 }
 
-function AssetsSection({ assets, departments, showToast }) {
+function AssetsSection({ assets, departments, refresh, showToast }) {
   const [form, setForm] = useState({ name: '', description: '', serialNumber: '', location: '', departmentId: departments[0]?.id || '', assignedToId: '' })
+  const [deletingAsset, setDeletingAsset] = useState(null)
   const submit = async (event) => {
     event.preventDefault()
-    try { await API.post('/assets/register', { ...form, status: 'ACTIVE', departmentId: Number(form.departmentId), assignedToId: Number(form.assignedToId) || null }); showToast('Asset registered') }
+    try { await API.post('/assets/register', { ...form, status: 'ACTIVE', departmentId: Number(form.departmentId), assignedToId: Number(form.assignedToId) || null }); showToast('Asset registered'); refresh() }
     catch (err) { showToast(getErrorMessage(err, 'Could not register asset.'), 'error') }
   }
-  return <section className="dashboard-section active"><div className="dashboard-grid"><div className="table-container"><h3>Register Asset</h3><form onSubmit={submit}>{['name', 'description', 'serialNumber', 'location', 'assignedToId'].map((key) => <Field key={key} label={key} value={form[key]} onChange={(value) => setForm({ ...form, [key]: value })} />)}<SelectBare label="Department" value={form.departmentId} onChange={(value) => setForm({ ...form, departmentId: value })} options={departments.map((d) => ({ value: d.id, label: d.name }))} /><button className="btn btn-primary btn-block">Register Asset</button></form></div><div className="table-container"><h3>Department Assets</h3><table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Department</th></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id}><td>{asset.id}</td><td>{asset.name}</td><td><Badge value={asset.status} /></td><td>{asset.departmentName || asset.department}</td></tr>)}</tbody></table></div></div></section>
+  const deleteAsset = async () => {
+    try {
+      await API.delete(`/assets/${deletingAsset.id}`)
+      setDeletingAsset(null)
+      showToast('Asset deleted')
+      refresh()
+    } catch (err) {
+      showToast(getErrorMessage(err, 'Could not delete asset.'), 'error')
+    }
+  }
+  return <section className="dashboard-section active"><div className="dashboard-grid"><div className="table-container"><h3>Register Asset</h3><form onSubmit={submit}>{['name', 'description', 'serialNumber', 'location', 'assignedToId'].map((key) => <Field key={key} label={key} value={form[key]} onChange={(value) => setForm({ ...form, [key]: value })} />)}<SelectBare label="Department" value={form.departmentId} onChange={(value) => setForm({ ...form, departmentId: value })} options={departments.map((d) => ({ value: d.id, label: d.name }))} /><button className="btn btn-primary btn-block">Register Asset</button></form></div><div className="table-container"><h3>Department Assets</h3><table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Department</th><th>Action</th></tr></thead><tbody>{!assets.length && <EmptyRow cols={5} text="No assets registered." />}{assets.map((asset) => <tr key={asset.id}><td>{asset.id}</td><td>{asset.name}</td><td><Badge value={asset.status} /></td><td>{asset.departmentName || asset.department}</td><td><button className="btn btn-sm btn-danger" type="button" onClick={() => setDeletingAsset(asset)}>Delete</button></td></tr>)}</tbody></table></div></div><ConfirmModal open={Boolean(deletingAsset)} title="Delete Asset" message={deletingAsset ? `Delete asset ${deletingAsset.name || `#${deletingAsset.id}`}?` : ''} tone="danger" confirmLabel="Delete Asset" onCancel={() => setDeletingAsset(null)} onConfirm={deleteAsset} /></section>
 }
 
 function SlaSection({ showToast }) {
@@ -836,6 +962,38 @@ function EscalationWatch({ tickets, setSection }) {
   )
 }
 
+function AuditLogSection({ audit = [] }) {
+  return (
+    <section className="dashboard-section active">
+      <div className="table-container">
+        <div className="table-header">
+          <h3><i className="fas fa-clipboard-list" /> Audit Log</h3>
+        </div>
+        <table>
+          <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
+          <tbody>
+            {!audit.length && <EmptyRow cols={5} text="No audit entries available." />}
+            {audit.map((entry) => (
+              <tr key={entry.id || `${entry.entityType}-${entry.entityId}-${entry.timestamp}`}>
+                <td>{formatDateTime(entry.timestamp)}</td>
+                <td>{entry.performedByUsername || entry.performedBy || '-'}</td>
+                <td><Badge value={entry.action} /></td>
+                <td>{entry.entityType || '-'}{entry.entityId ? ` #${entry.entityId}` : ''}</td>
+                <td>
+                  <div className="audit-detail">
+                    <strong>{entry.description || '-'}</strong>
+                    {(entry.oldValue || entry.newValue) && <span>{entry.oldValue || '-'} {'->'} {entry.newValue || '-'}</span>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function FeedbackSection({ user, tickets, ratings = [], showToast }) {
   const [form, setForm] = useState({ ticketId: '', rating: 5, feedback: '' })
   const resolved = tickets.filter((ticket) => String(ticket.status).toUpperCase() === 'RESOLVED')
@@ -918,7 +1076,8 @@ function SelectField({ label, value, onChange, options, placeholder, icon }) {
 }
 
 function SelectBare({ label, value, onChange, options }) {
-  return <div className="form-group ticket-filter-group"><label>{label}</label><select className="form-input" value={value} onChange={(event) => onChange(event.target.value)}><option value="">Select</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
+  const hasEmptyOption = options.some((option) => String(option.value) === '')
+  return <div className="form-group ticket-filter-group"><label>{label}</label><select className="form-input" value={value} onChange={(event) => onChange(event.target.value)}>{!hasEmptyOption && <option value="">Select</option>}{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
 }
 
 function getDashboardNav(role) {
@@ -930,6 +1089,7 @@ function getDashboardNav(role) {
     ['sla', 'SLA & Escalation', 'fa-stopwatch'],
     { key: 'reportsMenu', label: 'Reports', icon: 'fa-chart-line', children: [{ key: 'reports', label: 'Overview' }, { key: 'tickets', label: 'Ticket Operations' }, { key: 'escalations', label: 'Escalation Watch' }] },
     ['knowledge', 'Knowledge Base', 'fa-book'],
+    ['audit', 'Audit Log', 'fa-clipboard-list'],
     ['profile', 'Profile', 'fa-id-badge'],
   ].map((item) => Array.isArray(item) ? { key: item[0], label: item[1], icon: item[2] } : item)
   if (role === 'staff') return [['overview', 'Overview', 'fa-chart-line'], ['tickets', 'Assigned Kanban', 'fa-columns'], ['comments', 'Communication', 'fa-comments'], ['knowledge', 'Knowledge Base', 'fa-book'], ['feedback', 'Performance', 'fa-bullseye'], ['profile', 'Profile', 'fa-id-card']].map(([key, label, icon]) => ({ key, label, icon }))
@@ -974,6 +1134,10 @@ function buildStaffPerformanceRows(tickets = []) {
     return acc
   }, {})
   return Object.values(grouped).map((row) => ({ ...row, rate: row.assigned ? Math.round((row.resolved / row.assigned) * 100) : 0 }))
+}
+
+function getRegisteredStaff(users = []) {
+  return users.filter((user) => displayRole(user.role) === 'STAFF')
 }
 
 function MiniChart({ title, icon, items }) {
